@@ -12,8 +12,8 @@ int map[5][5] = {
 };
 const int TILE_SIZE = 64;
 
-int screenHeight = 800;
-int screenWidth = 450;
+int screenHeight = 1000;
+int screenWidth = 1000;
 
 class Player 
 {
@@ -38,7 +38,7 @@ public:
     void UpdateRays()
     {
         rays.resize(rayCount);
-        
+
         for (int i = 0; i < rayCount; i++)
         {
             hitWall = false;
@@ -69,16 +69,16 @@ public:
             }
             float corrected = distance * cos(angle - radAngle);
 
-            float wallHeight = 800 / corrected;
+            float wallHeight = screenHeight / corrected;
 
-            float columnWidth = 800 / rayCount;
+            float columnWidth = screenHeight / rayCount;
 
-            float drawStart = 225 - wallHeight / 2;
+            float drawStart = screenWidth / 2 - wallHeight / 2;
 
             DrawRectangle(
                 i * columnWidth,
                 drawStart,
-                columnWidth + 1,
+                columnWidth,
                 wallHeight,
                 DARKGRAY
             );
@@ -134,7 +134,7 @@ int main(void)
     Player player;
 	player.position = { 160, 160 };
 
-    InitWindow(800, 450, "Raylib Raycast");
+    InitWindow(screenWidth, screenHeight, "Raylib Raycast");
 
 	SetTargetFPS(60);
 
