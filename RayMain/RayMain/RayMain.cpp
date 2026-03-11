@@ -2,18 +2,19 @@
 #include <cmath>
 #include <vector>
 #include <iostream>
+
 using namespace std;
 int map[5][5] = {
     {1,1,1,1,1},
     {1,0,0,0,1},
-    {1,0,0,0,1},
+    {1,1,0,1,1},
     {1,0,0,0,1},
     {1,1,1,1,1}
 };
 const int TILE_SIZE = 64;
 
-int screenHeight = 1000;
-int screenWidth = 1000;
+int screenHeight = 920;
+int screenWidth = 1280;
 
 class Player 
 {
@@ -34,10 +35,14 @@ public:
 
     bool hitWall = false;
     float distance = 0.0f;
+    
+    float wallScale = 0.5f;
 
     void UpdateRays()
     {
         rays.resize(rayCount);
+
+        float projPlaneDist = (screenWidth / 2.0f) / tanf(fov / 2.0f);
 
         for (int i = 0; i < rayCount; i++)
         {
@@ -48,7 +53,9 @@ public:
             float angle = radAngle - fov * 0.5f + t * fov;
 
             Vector3 dir = { cosf(angle), -sinf(angle), 0.0f };
-            while (!hitWall && distance < 200.0f) 
+            rays[i].position = { position.x, position.y, 0.0f };
+            rays[i].direction = dir;
+            while (!hitWall && distance < 1000.0f) 
             {
                 distance++;
 
@@ -65,23 +72,38 @@ public:
                     hitWall = true;
                 }
 
-                //DrawRay(rays[i], RED);
+                float corrected = distance * cos(angle - radAngle);
+                if (corrected < 0.0001f) corrected = 0.0001f;
+
+                float wallHeight = (TILE_SIZE * wallScale / corrected) * projPlaneDist;
+
+                float columnWidth = screenWidth / rayCount;
+
+                int drawStart = (int)( (screenWidth / 2.0f) - (wallHeight / 1.65f));
+                int drawEnd = drawStart + (int)wallHeight;
+
+                if (drawStart < 0) drawStart = 0;
+                if (drawEnd > screenHeight) drawEnd = screenHeight;
+
+                int x = i * columnWidth;
+
+                float shade = 1.0f - std::min(distance / 100.0f, 1.0f); // регулируем диапазон
+                unsigned char col = (unsigned char)(180.0f * shade) + 30; // минимальная яркость
+                Color wallColor = { col, col, col, 255 };
+
+                if (drawEnd < screenHeight) {
+                    DrawRectangle(x, drawEnd, columnWidth, screenHeight - drawEnd, BROWN);
+                }
+
+                DrawRectangle(
+                    i * columnWidth,
+                    drawStart,
+                    columnWidth,
+                    wallHeight,
+                    wallColor
+                );
             }
-            float corrected = distance * cos(angle - radAngle);
-
-            float wallHeight = screenHeight / corrected;
-
-            float columnWidth = screenHeight / rayCount;
-
-            float drawStart = screenWidth / 2 - wallHeight / 2;
-
-            DrawRectangle(
-                i * columnWidth,
-                drawStart,
-                columnWidth,
-                wallHeight,
-                DARKGRAY
-            );
+            
         }
     }
 
@@ -145,7 +167,9 @@ int main(void)
 		player.Move();
         player.Rotate();
 		//DrawCircle(player.position.x, player.position.y, player.size, MAROON);
-        //DrawMap();
+        DrawMap();
+        DrawCircleV(player.position, player.size / 4.0f, MAROON);
+
         //DrawText("Congrats! You created your first window!", 190, 200, 20, LIGHTGRAY);
         EndDrawing();
     }
