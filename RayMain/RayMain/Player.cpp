@@ -4,6 +4,10 @@
 #include "Player.h"
 #include <cmath>
 
+#include "algorithm"
+
+using namespace std;
+
 Player::Player(Settings* s) : sets(s) {}
 
 float Player::UpdateRays()
@@ -15,35 +19,44 @@ float Player::UpdateRays()
     return projPlaneDist;
 }
 
-void Player::Move()
+void Player::MoveRayCast()
 {
-    float dx = cosf(radAngle) * speed * GetFrameTime();
-    float dy = sinf(radAngle) * speed * GetFrameTime();
+	float dt = GetFrameTime();
+    int TILE = sets->TILE_SIZE;
+    auto& map = sets->map;
 
-    float sideX = sinf(radAngle) * speed * GetFrameTime();
-    float sideY = -cosf(radAngle) * speed * GetFrameTime();
+    float dx = cosf(radAngle) * speed * dt;
+    float dy = sinf(radAngle) * speed * dt;  // ÈÑÏÐÀÂËÅÍÎ: áûëî -sinf (èíâåðòèðîâàëî Y)
 
-    if (IsKeyDown(KEY_W)) {
-        position.x += dx;
-        position.y -= dy;
+    // Ñòðåéô (áîêîì)
+    float sx = sinf(radAngle) * speed * dt;
+    float sy = -cosf(radAngle) * speed * dt; // ÈÑÏÐÀÂËÅÍÎ: áûëî íàîáîðîò
+
+    Vector3 newPos = position;
+
+    if (IsKeyDown(KEY_W)) { newPos.x += dx; newPos.y += dy; }
+    if (IsKeyDown(KEY_S)) { newPos.x -= dx; newPos.y -= dy; }
+    if (IsKeyDown(KEY_A)) { newPos.x += sx; newPos.y += sy; }
+    if (IsKeyDown(KEY_D)) { newPos.x -= sx; newPos.y -= sy; }
+
+    if (IsKeyDown(KEY_SPACE)) {
+        yOffset -= 1;
+    }
+    if (IsKeyDown(KEY_LEFT_SHIFT)) {
+        yOffset += 1;
     }
 
-    if (IsKeyDown(KEY_S)) {
-        position.x -= dx;
-        position.y += dy;
-    }
-    if (IsKeyDown(KEY_A)) {
-        position.x += sideX;
-        position.y -= sideY;
-    }
+    int tileX = (int)(newPos.x / TILE);
+    int tileY = (int)(newPos.y / TILE);
 
-    if (IsKeyDown(KEY_D)) {
-        position.x -= sideX;
-        position.y += sideY;
-    }
+    bool inBounds = tileX >= 0 && tileX < sets->mapWidth &&
+        tileY >= 0 && tileY < sets->mapHeight;
+
+    if (inBounds && map[tileY][tileX] == 0)
+        position = newPos;
 }
 
-void Player::Rotate()
+void Player::RotateRayCast()
 {
     UpdateRays();
 
@@ -51,10 +64,11 @@ void Player::Rotate()
     float centerY = sets->screenHeight / 2.0f;
     float centerX = sets->screenWidth / 2.0f;
 
-    displacement = { centerX - mousePos.x, centerY - mousePos.y };
-	radAngle -= displacement.x * 0.003f;
-	if (yAngle >= -360 && yAngle <= 1200) yAngle += displacement.y;
-	if (yAngle < -360) yAngle = -360;
-	if (yAngle > 1200) yAngle = 1200;
-    SetMousePosition(centerX, centerY);
-}
+    float deltaX = mousePos.x - centerX;
+    float deltaY = mousePos.y - centerY;
+
+    radAngle += deltaX * 0.003f;
+    yAngle -= deltaY;
+    yAngle = clamp(yAngle, -360.0f, 360.0f);
+    SetMousePosition((int)centerX, (int)centerY);
+};

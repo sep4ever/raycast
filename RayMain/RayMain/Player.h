@@ -15,10 +15,11 @@ public:
     float radAngle = 0.0f;
     float yAngle = 0.0f;
 
-    float speed = 30.0f;
+    float speed = 70.0f;
 
-    Vector2 position = { 0, 0 };
-    Vector2 displacement = { 0, 0 };
+    Vector3 position = { 0, 0, 0 };
+
+	float yOffset = 0.0f;
 
     int rayCount = 120;
     float fov = 90 * (3.14159265f / 180.0f); // 90 градусов в радианах
@@ -31,6 +32,8 @@ public:
 
     void Move();
 	void Rotate();
+    void MoveRayCast();
+	void RotateRayCast();
 	float UpdateRays();
     
 };
