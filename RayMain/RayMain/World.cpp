@@ -1,6 +1,7 @@
 ﻿#include "World.h"
 #include "raylib.h"
 #include "Player.h"
+#include "raymath.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
@@ -19,6 +20,18 @@ static float IntersectCircle2D(float ox, float oy, float dx, float dy,
     if (D < 0) return -1.f;
     float t = (-b - sqrtf(D)) / (2 * a);
     return t > 0 ? t : -1.f;
+}
+
+
+float World::SphereIntersect(Vector3 ro, Vector3 rd, Vector3 center, float radius)
+{
+    Vector3 L = { ro.x - center.x, ro.y - center.y, ro.z - center.z };
+    float b = L.x * rd.x + L.y * rd.y + L.z * rd.z;
+    float c = L.x * L.x + L.y * L.y + L.z * L.z - radius * radius;
+    float h = b * b - c;
+    if (h < 0) return -1.0f;
+    h = sqrt(h);
+    return -b - h; // ближайшая точка пересечения вдоль луча
 }
 
 void World::DrawFloorCeiling(float projPlaneDist)
@@ -49,6 +62,73 @@ void World::DrawFloorCeiling(float projPlaneDist)
     
 }
 
+void World::RayTraceScene(int width, int height)
+{
+    // простая сцена: одна сфера
+    Vector3 spherePos = { p->position.x + 200.0f, 0.0f, p->position.y - 300.0f }; // пример положения
+    float radius = 80.0f;
+
+    // камера (позиция) — используем игрока: x,z берём из позиции игрока, y=20 (высота камеры)
+    Vector3 ro = { p->position.x, 20.0f, p->position.y };
+
+    float aspect = (float)width / (float)height;
+    float scale = tanf(p->fov * 0.5f); // полукут обзора
+
+    // простой directional light
+    Vector3 lightDir = Vector3Normalize({ -0.5f, -1.0f, -0.3f });
+
+    // Для каждого пикселя — вычисляем первичный луч и тестируем пересечение со сферой
+    for (int y = 0; y < height; ++y)
+    {
+        for (int x = 0; x < width; ++x)
+        {
+            // NDC -> экранные координаты (-1..1)
+            float ndcX = ((x + 0.5f) / (float)width) * 2.0f - 1.0f;
+            float ndcY = 1.0f - ((y + 0.5f) / (float)height) * 2.0f;
+
+            // камера пространство
+            Vector3 dir = {
+                ndcX * aspect * scale,
+                ndcY * scale,
+                -1.0f
+            };
+
+            // нормализация
+            dir = Vector3Normalize(dir);
+
+            // поворот вокруг вертикальной оси по yaw игрока (radAngle)
+            float yaw = p->radAngle;
+            Vector3 rd = {
+                cosf(yaw) * dir.x - sinf(yaw) * dir.z,
+                dir.y,
+                sinf(yaw) * dir.x + cosf(yaw) * dir.z
+            };
+            rd = Vector3Normalize(rd);
+
+            float t = SphereIntersect(ro, rd, spherePos, radius);
+            Color pixel = BLACK;
+
+            if (t > 0.0f)
+            {
+                // точка попадания
+                Vector3 hitPos = { ro.x + rd.x * t, ro.y + rd.y * t, ro.z + rd.z * t };
+                Vector3 normal = Vector3Normalize(Vector3Subtract(hitPos, spherePos));
+                float diff = Vector3DotProduct(normal, Vector3Normalize(Vector3Negate(lightDir)));
+                if (diff < 0.0f) diff = 0.0f;
+
+                // простой цвет сферы + ламбертовское освещение
+                unsigned char r = (unsigned char)clamp(diff * 200.0f + 30.0f, 0.0f, 255.0f);
+                unsigned char g = (unsigned char)clamp(diff * 120.0f + 30.0f, 0.0f, 255.0f);
+                unsigned char b = (unsigned char)clamp(diff * 60.0f + 30.0f, 0.0f, 255.0f);
+
+                pixel = { r, g, b, 255 };
+            }
+
+            // Рисуем пиксель — DrawPixel быстрый для демонстрации (может быть медленно)
+            DrawPixel(x, y, pixel);
+        }
+    }
+}
 
 void World::Render(int rayCount, bool hitWall, float distance, float projPlaneDist)
 {
@@ -61,9 +141,7 @@ void World::Render(int rayCount, bool hitWall, float distance, float projPlaneDi
 
     float objX = 2.5f * TILE_SIZE;
     float objY = 2.5f * TILE_SIZE;
-    float objR = 0;//TILE_SIZE * 0.35f;
-
-    
+    float objR = 0;//TILE_SIZE * 0.35f;  
 
     for (int i = 0; i < rayCount; i++)
     {
