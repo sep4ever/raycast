@@ -2,15 +2,32 @@
 
 uniform vec2 u_resolution;
 uniform float u_time;
-uniform vec3 u_camPos;   // позиция камеры (x, y, z)
-uniform float u_camYaw;  // поворот вокруг вертикали (в радианах)
+uniform vec3 u_camPos;
+uniform float u_camYaw;
+uniform float u_camPitch;
+
+// object counts
+uniform int u_sphereCount;
+uniform int u_triCount;
+uniform int u_boxCount;
+
+// sphere: (x,y,z,r)
+uniform vec4 u_spheres[16];
+
+// triangles: each vertex xyz stored in vec4 (w ignored)
+uniform vec4 u_triA[16];
+uniform vec4 u_triB[16];
+uniform vec4 u_triC[16];
+
+// boxes: center xyz, and half-extents
+uniform vec4 u_boxCenters[16]; // xyz, w unused
+uniform vec4 u_boxHalfSizes[16]; // xyz (half size), w unused
 
 out vec4 fragColor;
 
 const float EPS = 1e-4;
 const vec3 ambientCol = vec3(0.08);
 
-// пересечение луча со сферой, возвращает положительный t или -1
 float intersectSphere(vec3 ro, vec3 rd, vec3 center, float r) {
     vec3 oc = ro - center;
     float b = dot(oc, rd);
@@ -24,141 +41,139 @@ float intersectSphere(vec3 ro, vec3 rd, vec3 center, float r) {
     return t > EPS ? t : -1.0;
 }
 
-// пересечение луча с горизонтальной плоскостью y = planeY
-float intersectPlaneY(vec3 ro, vec3 rd, float planeY) {
-    if (abs(rd.y) < 1e-6) return -1.0;
-    float t = (planeY - ro.y) / rd.y;
+float intersectTriangle(vec3 ro, vec3 rd, vec3 v0, vec3 v1, vec3 v2) {
+    vec3 e1 = v1 - v0;
+    vec3 e2 = v2 - v0;
+    vec3 p = cross(rd, e2);
+    float det = dot(e1, p);
+    if (abs(det) < 1e-6) return -1.0;
+    float invDet = 1.0 / det;
+    vec3 tvec = ro - v0;
+    float u = dot(tvec, p) * invDet;
+    if (u < 0.0 || u > 1.0) return -1.0;
+    vec3 q = cross(tvec, e1);
+    float v = dot(rd, q) * invDet;
+    if (v < 0.0 || u + v > 1.0) return -1.0;
+    float t = dot(e2, q) * invDet;
     return t > EPS ? t : -1.0;
 }
 
-// нормаль для сферы и плоскости
-vec3 normalSphere(vec3 p, vec3 center) { return normalize(p - center); }
-vec3 normalPlaneY() { return vec3(0.0, 1.0, 0.0); }
-
-// проверка тени: возвращает 0..1 (1 - полностью освещён)
-float shadowFactor(vec3 pt, vec3 lightDir, vec3 spheres[4], float radii[4], int sphCount) {
-    // смещаемся от поверхности немного по нормали (вызов должен передать корректную нормаль)
-    vec3 ro = pt + lightDir * EPS * 4.0; // небольшой сдвиг в сторону источника света
-    for (int i = 0; i < sphCount; ++i) {
-        float t = intersectSphere(ro, lightDir, spheres[i], radii[i]);
-        if (t > 0.0) return 0.12; // можно менять глубину тени
-    }
-    return 1.0;
-}
-
-vec3 shadePoint(vec3 ro, vec3 rd, vec3 hitPos, vec3 n, vec3 viewDir,
-                vec3 lightPos, vec3 spheres[4], float radii[4], int sphCount)
-{
-    vec3 color = vec3(0.0);
-    vec3 lampDir = normalize(lightPos - hitPos);
-    float distToLight = length(lightPos - hitPos);
-
-    float sh = shadowFactor(hitPos, lampDir, spheres, radii, sphCount);
-
-    // diffuse
-    float diff = max(dot(n, lampDir), 0.0);
-    // specular
-    vec3 refl = reflect(-lampDir, n);
-    float spec = pow(max(dot(refl, viewDir), 0.0), 32.0);
-
-    // simple material colors: vary by object by position (demo)
-    vec3 base = vec3(0.8, 0.45, 0.3);
-    color += ambientCol * base;
-    color += sh * diff * base;
-    color += sh * spec * vec3(1.0);
-
-    // clamp
-    return clamp(color, 0.0, 1.0);
+float intersectAABB(vec3 ro, vec3 rd, vec3 center, vec3 halfSize) {
+    vec3 minB = center - halfSize;
+    vec3 maxB = center + halfSize;
+    float tmin = (minB.x - ro.x) / rd.x;
+    float tmax = (maxB.x - ro.x) / rd.x;
+    if (tmin > tmax) { float tmp = tmin; tmin = tmax; tmax = tmp; }
+    float tymin = (minB.y - ro.y) / rd.y;
+    float tymax = (maxB.y - ro.y) / rd.y;
+    if (tymin > tymax) { float tmp = tymin; tymin = tymax; tymax = tmp; }
+    if ((tmin > tymax) || (tymin > tmax)) return -1.0;
+    if (tymin > tmin) tmin = tymin;
+    if (tymax < tmax) tmax = tymax;
+    float tzmin = (minB.z - ro.z) / rd.z;
+    float tzmax = (maxB.z - ro.z) / rd.z;
+    if (tzmin > tzmax) { float tmp = tzmin; tzmin = tzmax; tzmax = tmp; }
+    if ((tmin > tzmax) || (tzmin > tmax)) return -1.0;
+    if (tzmin > tmin) tmin = tzmin;
+    if (tzmax < tmax) tmax = tzmax;
+    return tmin > EPS ? tmin : (tmax > EPS ? tmax : -1.0);
 }
 
 void main() {
-    // set up camera basis (camera looks toward negative Z in camera space)
     vec2 uv = (gl_FragCoord.xy / u_resolution) * 2.0 - 1.0;
     uv.x *= u_resolution.x / u_resolution.y;
 
-    // camera parameters
     vec3 camPos = u_camPos;
     float fov = radians(60.0);
     float scale = tan(fov * 0.5);
 
-    // ray in camera space
     vec3 rayCam = normalize(vec3(uv.x * scale, uv.y * scale, -1.0));
+    float cy = cos(u_camYaw), sy = sin(u_camYaw);
+    //vec3 rd = normalize(vec3(cy * rayCam.x - sy * rayCam.z, rayCam.y, sy * rayCam.x + cy * rayCam.z));
+    // поворот по pitch (X) — u_camPitch: положительный поднимает взгляд вверх
+    float cp = cos(u_camPitch);
+    float sp = sin(u_camPitch);
+    vec3 rd_yaw = vec3(cy * rayCam.x - sy * rayCam.z,
+                   rayCam.y,
+                   sy * rayCam.x + cy * rayCam.z);
+    // 1. forward из yaw/pitch
+    vec3 forward = normalize(vec3(
+        cos(u_camYaw) * cos(u_camPitch),
+        sin(u_camPitch),
+        sin(u_camYaw) * cos(u_camPitch)
+    ));
 
-    // rotate ray by camera yaw around Y
-    float cy = cos(u_camYaw);
-    float sy = sin(u_camYaw);
-    vec3 rd = normalize(vec3(cy * rayCam.x - sy * rayCam.z,
-                             rayCam.y,
-                             sy * rayCam.x + cy * rayCam.z));
+    // 2. фиксированный мировой up
+    vec3 worldUp = vec3(0.0, 1.0, 0.0);
 
-    // scene: spheres and plane
-    const int sphCount = 3;
-    vec3 spheres[4];
-    float radii[4];
-    spheres[0] = vec3(camPos.x + 200.0,  20.0, camPos.z - 300.0); radii[0] = 80.0;
-    spheres[1] = vec3(camPos.x + 0.0,   40.0, camPos.z - 400.0); radii[1] = 50.0;
-    spheres[2] = vec3(camPos.x - 150.0, 30.0, camPos.z - 250.0); radii[2] = 40.0;
+    // 3. строим базис
+    vec3 right = normalize(cross(forward, worldUp));
+    vec3 up    = normalize(cross(right, forward));
+    vec3 rd = normalize(
+        forward +
+        uv.x * scale * right +
+        uv.y * scale * up
+    );
+    vec3 ro = camPos;
 
-    // light
-    vec3 lightPos = vec3(camPos.x + 100.0 * cos(u_time * 0.6), 200.0, camPos.z - 200.0 + 120.0 * sin(u_time * 0.5));
-
-    // find nearest hit
     float tMin = 1e20;
-    int hitType = 0; // 0 - none, 1 - sphere, 2 - floor
-    int hitIndex = -1;
+    vec3 hitNormal = vec3(0.0);
+    vec3 hitColor = vec3(0.0);
+    bool hit = false;
 
     // spheres
-    for (int i = 0; i < sphCount; ++i) {
-        float t = intersectSphere(camPos, rd, spheres[i], radii[i]);
-        if (t > 0.0 && t < tMin) { tMin = t; hitType = 1; hitIndex = i; }
+    for (int i = 0; i < u_sphereCount; ++i) {
+        vec4 s = u_spheres[i];
+        float t = intersectSphere(ro, rd, s.xyz, s.w);
+        if (t > 0.0 && t < tMin) {
+            tMin = t;
+            vec3 p = ro + rd * t;
+            hitNormal = normalize(p - s.xyz);
+            hitColor = vec3(0.9, 0.4, 0.3);
+            hit = true;
+        }
     }
-    // plane at y=0
-    float tp = intersectPlaneY(camPos, rd, 0.0);
-    if (tp > 0.0 && tp < tMin) { tMin = tp; hitType = 2; hitIndex = -1; }
 
-    vec3 finalColor = vec3(0.0);
+    // triangles
+    for (int i = 0; i < u_triCount; ++i) {
+        vec3 a = u_triA[i].xyz;
+        vec3 b = u_triB[i].xyz;
+        vec3 c = u_triC[i].xyz;
+        float t = intersectTriangle(ro, rd, a, b, c);
+        if (t > 0.0 && t < tMin) {
+            tMin = t;
+            vec3 p = ro + rd * t;
+            hitNormal = normalize(cross(b - a, c - a));
+            hitColor = vec3(0.6, 0.6, 0.6);
+            hit = true;
+        }
+    }
 
-    if (hitType == 0) {
-        // sky gradient
-        float v = 0.5 * (rd.y + 1.0);
-        finalColor = mix(vec3(0.2, 0.35, 0.6), vec3(0.9, 0.95, 1.0), pow(clamp(v,0.0,1.0), 1.2));
+    // boxes
+    for (int i = 0; i < u_boxCount; ++i) {
+        vec3 center = u_boxCenters[i].xyz;
+        vec3 halfSize = u_boxHalfSizes[i].xyz;
+        float t = intersectAABB(ro, rd, center, halfSize);
+        if (t > 0.0 && t < tMin) {
+            tMin = t;
+            vec3 p = ro + rd * t;
+            vec3 local = (p - center) / halfSize;
+            vec3 absLocal = abs(local);
+            if (absLocal.x > absLocal.y && absLocal.x > absLocal.z) hitNormal = vec3(sign(local.x),0.0,0.0);
+            else if (absLocal.y > absLocal.z) hitNormal = vec3(0.0,sign(local.y),0.0);
+            else hitNormal = vec3(0.0,0.0,sign(local.z));
+            hitColor = vec3(0.6,0.6,0.6);
+            hit = true;
+        }
+    }
+
+    vec3 color = vec3(0.0);
+    if (!hit) {
+        color = vec3(0.6, 0.8, 1.0) * (0.5 + 0.5 * rd.y);
     } else {
-        vec3 hitPos = camPos + rd * tMin;
-        vec3 normal;
-        vec3 viewDir = normalize(-rd);
-
-        if (hitType == 1) {
-            normal = normalSphere(hitPos, spheres[hitIndex]);
-        } else {
-            normal = normalPlaneY();
-        }
-
-        // base shading
-        finalColor = shadePoint(camPos, rd, hitPos, normal, viewDir, lightPos, spheres, radii, sphCount);
-
-        // simple reflection (one bounce)
-        float metalness = 0.25; // 0..1
-        if (metalness > 0.0) {
-            vec3 reflectDir = reflect(rd, normal);
-            // offset origin to avoid self-intersection
-            vec3 ro2 = hitPos + normal * EPS * 4.0;
-            // test reflection against spheres only (cheap)
-            float tRef = 1e20;
-            for (int i = 0; i < sphCount; ++i) {
-                float tt = intersectSphere(ro2, reflectDir, spheres[i], radii[i]);
-                if (tt > 0.0 && tt < tRef) tRef = tt;
-            }
-            if (tRef < 1e19) {
-                vec3 hit2 = ro2 + reflectDir * tRef;
-                vec3 n2 = normalize(hit2 - spheres[0]); // approximate normal (demo)
-                float reflShade = max(dot(normalize(-lightPos + hit2), n2), 0.0);
-                finalColor = mix(finalColor, vec3(0.9,0.9,0.95) * reflShade, metalness);
-            }
-        }
+        float diffuse = max(dot(hitNormal, normalize(vec3(-0.5, -1.0, -0.3))), 0.0);
+        color = hitColor * (0.2 + 0.8 * diffuse);
     }
 
-    // gamma
-    finalColor = pow(finalColor, vec3(1.0/2.2));
-
-    fragColor = vec4(finalColor, 1.0);
+    fragColor = vec4(pow(color, vec3(1.0/2.2)), 1.0);
 }

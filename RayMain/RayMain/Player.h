@@ -20,6 +20,7 @@ public:
     Vector3 position = { 0, 0, 0 };
 
 	float yOffset = 0.0f;
+	float yRadOffset = 0.0f;
 
     int rayCount = 120;
     float fov = 90 * (3.14159265f / 180.0f); // 90 градусов в радианах

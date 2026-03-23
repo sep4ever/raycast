@@ -36,4 +36,8 @@
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="shader.frag" />
+    <None Include="..\glsl RayMain\shader.frag" />
+  </ItemGroup>
 </Project>
