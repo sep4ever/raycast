@@ -5,11 +5,18 @@
 #include <vector>
 #include <algorithm>
 
+#include <iostream>
+
 #include "Settings.h"
 #include "Player.h"
 #include "World.h"
 
+#include <string>
+#include <sstream>
+
 using namespace std;
+
+int maxChars = 28;
 
 // Иниты.
 Settings sets;
@@ -25,6 +32,24 @@ static void DrawDebugText(const char* fmt, ...)
     va_end(args);
     DrawText(buf, 10, 10, 12, BLACK);
 }
+
+struct Triangle {
+    float A[4];
+    float B[4];
+    float C[4];
+
+    void SetVertices(float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz)
+    {
+        A[0] = ax; A[1] = ay; A[2] = az; A[3] = 0.0f;
+        B[0] = bx; B[1] = by; B[2] = bz; B[3] = 0.0f;
+        C[0] = cx; C[1] = cy; C[2] = cz; C[3] = 0.0f;
+	}
+
+    Triangle(float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz)
+    {
+		SetVertices(ax, ay, az, bx, by, bz, cx, cy, cz);
+    }
+};
 
 int main(void)
 {
@@ -79,6 +104,15 @@ int main(void)
 
     bool useRayTrace = false; // переключатель режима (F1)
 
+    vector<Triangle> triangles;
+    
+    //triangles.push_back(triangle);
+
+    bool mouseOnText = false;
+
+    string name;
+    int letterCount = 0;
+
     while (!WindowShouldClose())
     {
         // Обновления игрока
@@ -92,6 +126,86 @@ int main(void)
 
         if (useRayTrace && shaderLoaded)
         {
+            if (IsKeyPressed(KEY_SLASH))
+            {
+                mouseOnText = !mouseOnText;
+			}
+            if (mouseOnText)
+            {
+                SetMouseCursor(MOUSE_CURSOR_IBEAM);
+
+                int key = GetCharPressed();
+
+                while (key > 0)
+                {
+                    if (((key >= 45 && key <= 57 && key != 47) || key == 59))
+                    {
+						name.push_back((char)key);
+                        //name[letterCount] = (float)key;
+                        //name[letterCount + 1] = '\0';
+                        letterCount++;
+                    }
+
+                    key = GetCharPressed();
+                }
+
+                if (IsKeyPressed(KEY_BACKSPACE) && !name.empty())
+                {
+                    name.pop_back();
+                    letterCount--;
+                }
+            }
+            else 
+            {
+                if (letterCount > 0) 
+                {
+                    float values[9] = { 0.0f }; // по умолчанию нули
+
+                    if (name.data() != nullptr)
+                    {
+                        string str = name;
+                        string temp;
+                        stringstream ss(str);
+
+                        int i = 0;
+
+                        while (getline(ss, temp, ';') && i < 9)
+                        {
+                            try
+                            {
+                                values[i] = stof(temp);
+                            }
+                            catch (...)
+                            {
+                                values[i] = 0.0f; // если ошибка — ноль
+                            }
+                            i++;
+                        }
+                    }
+
+                    Triangle triangle(
+                        player.position.x + values[0],
+                        player.position.y + values[1],
+                        player.position.z + values[2],
+
+                        player.position.x + values[3],
+                        player.position.y + values[4],
+                        player.position.z + values[5],
+
+                        player.position.x + values[6],
+                        player.position.y + values[7],
+                        player.position.z + values[8]
+                    );
+                    triangles.push_back(triangle);
+					for (int i = 0; i < 9; i++) values[i] = 0.0f;
+                    name.clear();
+                    letterCount = 0;
+                }
+                SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+            }
+
+			if (IsKeyPressed(KEY_C)) triangles.clear();
+
             // Униформы общего назначения
             float resolution[2] = { (float)sets.screenWidth, (float)sets.screenHeight };
             float t = GetTime();
@@ -109,10 +223,10 @@ int main(void)
             // --- Формируем сцену: сферы, треугольники, коробки ---
             // Используем абсолютные мировые координаты для объектов (не привязывать к камере)
             int sphereCount = 3;
-            std::vector<float> spheresData;
+            vector<float> spheresData;
             spheresData.reserve(sphereCount * 4);
             // x, y(height), z(depth), radius
-            spheresData.push_back(200.0f); spheresData.push_back(20.0f);  spheresData.push_back(-300.0f); spheresData.push_back(80.0f);
+            spheresData.push_back(-200.0f); spheresData.push_back(20.0f);  spheresData.push_back(-300.0f); spheresData.push_back(80.0f);
             spheresData.push_back(0.0f);   spheresData.push_back(40.0f);  spheresData.push_back(-400.0f); spheresData.push_back(50.0f);
             spheresData.push_back(-150.0f); spheresData.push_back(30.0f);  spheresData.push_back(-250.0f); spheresData.push_back(40.0f);
 
@@ -120,15 +234,16 @@ int main(void)
             SetShaderValueV(rtShader, locSpheres, spheresData.data(), SHADER_UNIFORM_VEC4, sphereCount);
 
             // Треугольники: vec4 per vertex (z = player.position.y ...)
-            int triCount = 1;
-            float triA[4] = { 100.0f, 20.0f, -200.0f, 0.0f };
-            float triB[4] = { 200.0f, 20.0f, -250.0f, 0.0f };
-            float triC[4] = { 300.0f, 10.0f, -300.0f, 0.0f };
+            int triCount = triangles.size();
 
             SetShaderValue(rtShader, locTriCount, &triCount, SHADER_UNIFORM_INT);
-            SetShaderValueV(rtShader, locTriA, triA, SHADER_UNIFORM_VEC4, triCount);
-            SetShaderValueV(rtShader, locTriB, triB, SHADER_UNIFORM_VEC4, triCount);
-            SetShaderValueV(rtShader, locTriC, triC, SHADER_UNIFORM_VEC4, triCount);
+
+            for (int i = 0; i < triangles.size(); i++) 
+            {
+                SetShaderValueV(rtShader, locTriA, triangles[i].A, SHADER_UNIFORM_VEC4, triCount);
+                SetShaderValueV(rtShader, locTriB, triangles[i].B, SHADER_UNIFORM_VEC4, triCount);
+                SetShaderValueV(rtShader, locTriC, triangles[i].C, SHADER_UNIFORM_VEC4, triCount);
+            }
 
             // Boxes (AABB): центр (x, y, z) — z = player.position.y
             int boxCount = 1;
@@ -146,6 +261,11 @@ int main(void)
             // Диагностика на экране
             DrawText(TextFormat("locTriCount=%d locTriA=%d locTriA0=%d", locTriCount, locTriA, locTriA0), 10, 28, 12, RED);
             DrawText(TextFormat("triCount=%d   cam=(%.1f,%.1f,%.1f)", triCount, camPosArr[0], camPosArr[1], camPosArr[2]), 10, 44, 12, RED);
+            
+            string text = "Triangle coordinates(example: (x;y;z)): " + name;
+
+            DrawText(text.c_str(), 5, 68, 20, MAROON);
+            DrawText("(Write coordinates for each verticy!)", 5, 88, 20, RED);
         }
         else
         {
@@ -153,7 +273,7 @@ int main(void)
             world.Render(player.rayCount, player.hitWall, player.distance, player.UpdateRays());
         }
 
-        DrawFPS(10, 90);
+        DrawFPS(GetScreenWidth() - 90, 0);
         EndDrawing();
     }
 
