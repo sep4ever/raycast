@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "g++ .vscode/*.cpp -o game $(pkg-config --cflags --libs raylib)"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$msCompile"]
+    }
+  ]
+}
